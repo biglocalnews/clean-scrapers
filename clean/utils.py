@@ -4,10 +4,12 @@ import logging
 import os
 from pathlib import Path
 from time import sleep
-from typing import Optional, TypedDict
+from typing import List, Literal, Optional, TypedDict
+from urllib.parse import parse_qs, urlparse
 
 import requests
-import us
+import us  # type: ignore
+from pytube import Playlist, YouTube  # type: ignore
 from retry import retry
 
 logger = logging.getLogger(__name__)
@@ -117,7 +119,13 @@ def write_rows_to_csv(output_path: Path, rows: list, mode="w"):
         writer.writerows(rows)
 
 
-def write_dict_rows_to_csv(output_path, headers, rows, mode="w", extrasaction="raise"):
+def write_dict_rows_to_csv(
+    output_path,
+    headers,
+    rows,
+    mode="w",
+    extrasaction: Literal["raise", "ignore"] = "raise",
+):
     """Write the provided dictionary to the provided path as comma-separated values.
 
     Args:
@@ -194,3 +202,56 @@ def get_url(
 
     # Return the response
     return response
+
+
+def get_youtube_url(url: str) -> List[str]:
+    """Download a video or playlist from a YouTube URL and save it to the cache. Return the set of stream URLs to be downloaded.
+
+    Args:
+        url (str): The URL of the video or playlist to download
+    """
+    logger.debug(f"Requesting YouTube {url}")
+    stream_urls = []
+
+    try:
+        if is_youtube_playlist(url):
+            logger.debug("Detected Youtube playlist, fetching URLs")
+            playlist = Playlist(url)
+            for video in playlist.videos:
+                stream = video.streams.get_highest_resolution()
+                if stream:
+                    stream_urls.append(stream.url)
+        else:
+            logger.debug("Detected Youtube video, fetching URL")
+            video = YouTube(url)
+            stream = video.streams.get_highest_resolution()
+            if stream:
+                stream_urls.append(stream.url)
+    except Exception as e:
+        logger.error(f"Error fetching YouTube content: {e}")
+
+    return stream_urls
+
+
+def is_youtube_playlist(url: str) -> bool:
+    """
+    Check if the given URL is a YouTube playlist URL.
+
+    Args:
+        url (str): The URL to check.
+
+    Returns:
+        bool: True if the URL is a playlist URL, False otherwise.
+    """
+    parsed_url = urlparse(url)
+    query_params = parse_qs(parsed_url.query)
+
+    # Check if 'list' query parameter exists
+    if "list" in query_params:
+        return True
+
+    # Check if URL path contains '/playlist'
+    if "/playlist" in parsed_url.path:
+        return True
+
+    return False
